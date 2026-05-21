@@ -23,21 +23,26 @@ The `latest` image includes ffmpeg for optional transcoding via `exec`.
 
 Built on a fork of
 [nginx-rtmp-module](https://github.com/WoozyMasta/nginx-rtmp-module)
-that adds two features not present in the original:
+that adds three features not present in the original:
 
+* **TLS outbound (RTMPS)** -
+  outgoing pushes to platforms that require `rtmps://`
+  work natively without an external stunnel
 * **Dynamic push** -
   stream keys are passed as RTMP query args at publish time,
   so one running nginx can fan out
   to any set of platforms without a config reload
-* **TLS outbound (RTMPS)** -
-  outgoing pushes to platforms that require `rtmps://`
-  (Facebook, Kick) work natively without an external stunnel
+* **Dynamic exec** -
+  spawn an ffmpeg transcoder only when a specific query arg is present;
+  each destination can have its own independent ffmpeg process
+  and its own encoding parameters
 
 ## Features
 
 * Static nginx binary, scratch runtime image
 * RTMP ingest on port 1935
 * Multi-platform restream via query args - no config change needed
+* Per-destination conditional transcoding via `dynamic_exec_arg`
 * Stream key is not baked into the image
 * No shell in runtime image
 * Two image variants: `latest` (nginx + ffmpeg + HTTP stats)
@@ -120,23 +125,25 @@ Server:     rtmp://SERVER_IP:1935/transcode/live
 Stream Key: ?yt=YOUTUBE_KEY&tw=TWITCH_KEY
 ```
 
-### YouTube original, Twitch transcoded
+### Per-destination transcoding with dynamic_exec_arg
 
-YouTube accepts high bitrates; Twitch caps at ~6000 kbps.
-Send the original stream to YouTube
-and a re-encoded copy to Twitch simultaneously.
+`dynamic_exec_arg` spawns a separate ffmpeg only when the matching query arg
+is present. Each destination gets its own encoding parameters.
+No wasted CPU, no extra applications.
+
+YouTube accepts high bitrates directly; Twitch and other platforms may cap
+at 6000 kbps. Push the original to YouTube and transcode only for the rest:
 
 ```nginx
 application live {
     live on;
     record off;
 
-    # Original stream pushed directly to YouTube
+    # Direct push to YouTube - no transcoding
     dynamic_push_arg yt rtmp://a.rtmp.youtube.com/live2;
 
-    # ffmpeg reads the same published stream, re-encodes for Twitch limits,
-    # and pushes the result to the live_tw application below
-    exec /bin/ffmpeg
+    # ffmpeg spawns only when ?tw=KEY is present
+    dynamic_exec_arg tw /bin/ffmpeg
         -loglevel warning
         -i rtmp://127.0.0.1:1935/live/$name
         -c:v libx264 -preset veryfast
@@ -144,26 +151,29 @@ application live {
         -vf scale=1920:1080
         -r 60
         -c:a aac -b:a 160k -ar 48000
-        -f flv rtmp://127.0.0.1:1935/live_tw/$name?$args;
-}
+        -f flv rtmp://live.twitch.tv/app/$value;
 
-application live_tw {
-    live on;
-    record off;
-
-    dynamic_push_arg tw rtmp://live.twitch.tv/app;
+    # Independent ffmpeg spawns only when ?vk=KEY is present
+    dynamic_exec_arg vk /bin/ffmpeg
+        -loglevel warning
+        -i rtmp://127.0.0.1:1935/live/$name
+        -c:v libx264 -preset veryfast
+        -b:v 4000k -maxrate 4000k -bufsize 8000k
+        -vf scale=1280:720
+        -r 30
+        -c:a aac -b:a 128k -ar 48000
+        -f flv rtmp://ovsu.mycdn.me/input/$value;
 }
 ```
 
 ```text
-Server:     rtmp://SERVER_IP:1935/live/stream
-Stream Key: ?yt=YOUTUBE_KEY&tw=TWITCH_KEY
+Server:     rtmp://SERVER_IP:1935/live/live
+Stream Key: ?yt=YOUTUBE_KEY&tw=TWITCH_KEY&vk=VK_KEY
 ```
 
-ffmpeg spawns unconditionally on every publish to `live`. If `tw` is absent
-from the query args, `live_tw` receives the transcoded stream but
-`dynamic_push_arg tw` does not push anywhere - wasted CPU but no error.
-Use a dedicated application per use case if that matters.
+Available variables in `dynamic_exec_arg` commands:
+`$name` (stream name), `$value` (the matched arg value — the stream key),
+`$app` (application name), `$args` (full query string).
 
 ## Build locally
 
@@ -213,6 +223,66 @@ docker run -d \
 > [!NOTE]
 > The `latest` image runs ffmpeg as a subprocess of nginx.  
 > Increase tmpfs size if you expect multiple concurrent transcoding sessions.
+
+## Custom configuration
+
+### Override individual config files
+
+Mount any of the three config files to replace the defaults:
+
+```bash
+# Override only the access rules
+docker run -d \
+  --network host \
+  -v /etc/nginx-restream/access.conf:/config/access.conf:ro \
+  ghcr.io/woozymasta/nginx-restream:latest
+
+# Override all three
+docker run -d \
+  --network host \
+  -v /etc/nginx-restream/restream.conf:/config/restream.conf:ro \
+  -v /etc/nginx-restream/access.conf:/config/access.conf:ro \
+  -v /etc/nginx-restream/stats.conf:/config/stats.conf:ro \
+  ghcr.io/woozymasta/nginx-restream:latest
+```
+
+Config files shipped in the image:
+
+* `/config/restream.conf` - main nginx config with the `restream` application
+* `/config/access.conf` - RTMP publish allow/deny rules
+* `/config/stats.conf` - HTTP stats server on port 8080
+
+### Use the transcoding config
+
+The image ships `config/restream-transcode.conf` as an example configuration
+with `dynamic_exec_arg` — YouTube receives the original stream,
+other platforms get independently transcoded copies.
+
+```bash
+docker run -d \
+  --network host \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=256m,mode=1777 \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  ghcr.io/woozymasta/nginx-restream:latest \
+  -c /config/restream-transcode.conf -g "daemon off;"
+```
+
+Or mount your own config:
+
+```bash
+docker run -d \
+  --network host \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=256m,mode=1777 \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  -v /etc/nginx-restream/my.conf:/config/my.conf:ro \
+  -v /etc/nginx-restream/access.conf:/config/access.conf:ro \
+  ghcr.io/woozymasta/nginx-restream:latest \
+  -c /config/my.conf -g "daemon off;"
+```
 
 ## Test stream
 
