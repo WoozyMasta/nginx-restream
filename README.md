@@ -31,6 +31,22 @@ The incoming stream must already be compatible with the target platforms.
 * No ffmpeg, no shell in runtime image
 * Two image variants: `latest` (with HTTP stats) and `slim` (RTMP only)
 
+## Images
+
+* [`ghcr.io/woozymasta/nginx-restream`](https://github.com/WoozyMasta/nginx-restream/pkgs/container/nginx-restream)
+* [`docker.io/woozymasta/nginx-restream`](https://hub.docker.com/r/woozymasta/nginx-restream)
+
+```bash
+docker pull ghcr.io/woozymasta/nginx-restream:latest
+docker pull ghcr.io/woozymasta/nginx-restream:slim
+```
+
+Two variants are published:
+
+* `latest` — includes HTTP stats endpoint on port 8080
+* `slim` — RTMP only, no HTTP server, smaller image size
+* `X.Y.Z` / `X.Y.Z-slim` — versioned releases of each variant
+
 ## RTMP URL
 
 Pass platform stream keys as query args:
