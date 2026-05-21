@@ -19,7 +19,7 @@ jobs:
 
       - name: Generate release notes
         run: |
-          awk -f .github/release-notes.awk CHANGELOG.md > release.md
+          awk -v tag="${{ github.ref_name }}" -f .github/release-notes.awk CHANGELOG.md > release.md
 
       - name: Create GitHub release
         uses: ncipollo/release-action@v1
