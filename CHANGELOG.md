@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning][].
 ### Removed
 -->
 
+## [0.2.1][] - 2026-05-21
+
+### Fixed
+
+* Restored functionality from a lost stats.conf file in the `slim` image.
+
+[0.2.1]: https://github.com/WoozyMasta/nginx-restream/compare/0.2.0...0.2.1
+
 ## [0.2.0][] - 2026-05-21
 
 ### Added

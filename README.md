@@ -207,11 +207,12 @@ docker run -d \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
   --security-opt no-new-privileges:true \
   --cap-drop ALL \
-  nginx-restream:latest
+  ghcr.io/woozymasta/nginx-restream:latest
 ```
 
-Note: the `latest` image runs ffmpeg as a subprocess of nginx.
-Increase tmpfs size if you expect multiple concurrent transcoding sessions.
+> [!NOTE]
+> The `latest` image runs ffmpeg as a subprocess of nginx.  
+> Increase tmpfs size if you expect multiple concurrent transcoding sessions.
 
 ## Test stream
 

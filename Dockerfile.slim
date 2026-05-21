@@ -57,7 +57,9 @@ RUN set -eux; \
     ./nginx -V
 
 WORKDIR /out/config
-COPY config/restream.conf config/access.conf ./
+COPY config ./
+# wipe http stats config for slim build
+RUN echo > stats.conf
 
 WORKDIR /out/bin
 RUN mv /src/nginx/build/nginx nginx
