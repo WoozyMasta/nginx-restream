@@ -72,11 +72,12 @@ Pass platform stream keys as query args:
 rtmp://SERVER_IP:1935/restream/live?yt=YOUTUBE_KEY&tw=TWITCH_KEY
 ```
 
-OBS settings:
+OBS settings — the server field must end at the application name,
+the stream key carries the stream name and query args:
 
 ```text
-Server:     rtmp://SERVER_IP:1935/restream/live
-Stream Key: ?yt=YOUTUBE_KEY&tw=TWITCH_KEY
+Server:     rtmp://SERVER_IP:1935/restream
+Stream Key: live?yt=YOUTUBE_KEY&tw=TWITCH_KEY
 ```
 
 ## Transcoding with ffmpeg
