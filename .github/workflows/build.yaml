@@ -7,6 +7,8 @@ on:
       - master
     tags:
       - '*.*.*'
+    paths-ignore:
+      - '**.md'
 
 permissions:
   contents: read
