@@ -1,0 +1,75 @@
+ARG ALPINE_VERSION=3.23
+
+FROM docker.io/library/alpine:$ALPINE_VERSION AS build
+
+ARG NGINX_RTMP_VERSION=master
+ARG NGINX_VERSION=1.30.1
+
+# hadolint ignore=DL3018
+RUN apk add --no-cache \
+    build-base \
+    linux-headers \
+    git \
+    ca-certificates \
+    openssl-dev \
+    openssl-libs-static
+
+WORKDIR /src/nginx-rtmp-module
+
+RUN set -eux; \
+    git clone --depth 1 --single-branch --branch "$NGINX_RTMP_VERSION" \
+      https://github.com/WoozyMasta/nginx-rtmp-module.git .
+
+WORKDIR /src/nginx
+
+RUN set -eux; \
+    git clone --depth 1 --single-branch --branch "release-$NGINX_VERSION" \
+      https://github.com/nginx/nginx.git .
+
+
+ENV CFLAGS='-Os -fstack-protector-strong -D_FORTIFY_SOURCE=2'
+ENV LDFLAGS='-static -s -Wl,-z,relro,-z,now'
+
+RUN set -eux; \
+    ./auto/configure \
+      --builddir=build \
+      --prefix=/share \
+      --conf-path=/config/restream.conf \
+      --sbin-path=/bin \
+      --pid-path=/tmp/nginx.pid \
+      --lock-path=/tmp/nginx.lock \
+      --error-log-path=/dev/stderr \
+      --http-log-path=/dev/stdout \
+      --add-module=/src/nginx-rtmp-module \
+      --with-cc-opt="$CFLAGS" \
+      --with-ld-opt="$LDFLAGS" \
+      --without-pcre \
+      --without-http \
+      --without-select_module \
+      --without-poll_module; \
+    make -j"$(nproc)"
+
+WORKDIR /src/nginx/build
+
+RUN set -eux; \
+    strip -s -R .comment --strip-unneeded nginx; \
+    ! ldd nginx && :; \
+    ./nginx -V
+
+WORKDIR /out/config
+COPY config/restream.conf config/access.conf ./
+
+WORKDIR /out/bin
+RUN mv /src/nginx/build/nginx nginx
+
+WORKDIR /out/tmp
+
+FROM scratch
+
+COPY --from=build --chown=1000:1000 /out /
+
+USER 1000:1000
+STOPSIGNAL SIGQUIT
+
+ENTRYPOINT ["/bin/nginx"]
+CMD ["-g", "daemon off;"]

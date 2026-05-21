@@ -1,11 +1,10 @@
 ARG ALPINE_VERSION=3.23
 
-FROM docker.io/library/alpine:$ALPINE_VERSION AS build
+# nginx build
+FROM docker.io/library/alpine:$ALPINE_VERSION AS nginx-build
 
 ARG NGINX_RTMP_VERSION=master
 ARG NGINX_VERSION=1.30.1
-ARG WITH_STATS=0
-ARG EXTRA_FLAGS=
 
 # hadolint ignore=DL3018
 RUN apk add --no-cache \
@@ -19,23 +18,19 @@ RUN apk add --no-cache \
 WORKDIR /src/nginx-rtmp-module
 
 RUN set -eux; \
-    git clone --depth 1 --branch "$NGINX_RTMP_VERSION" \
+    git clone --depth 1 --single-branch --branch "$NGINX_RTMP_VERSION" \
       https://github.com/WoozyMasta/nginx-rtmp-module.git .
 
 WORKDIR /src/nginx
 
 RUN set -eux; \
-    git clone --depth 1 --branch "release-$NGINX_VERSION" \
+    git clone --depth 1 --single-branch --branch "release-$NGINX_VERSION" \
       https://github.com/nginx/nginx.git .
-
 
 ENV CFLAGS='-Os -fstack-protector-strong -D_FORTIFY_SOURCE=2'
 ENV LDFLAGS='-static -s -Wl,-z,relro,-z,now'
 
-# ignore for split flags as separate strings
-# hadolint ignore=SC2086
 RUN set -eux; \
-    if [ "$WITH_STATS" = 0 ]; then EXTRA_FLAGS="$EXTRA_FLAGS --without-http"; fi; \
     ./auto/configure \
       --builddir=build \
       --prefix=/share \
@@ -79,8 +74,7 @@ RUN set -eux; \
       --without-http_upstream_keepalive_module \
       --without-http_upstream_zone_module \
       --without-select_module \
-      --without-poll_module \
-      $EXTRA_FLAGS; \
+      --without-poll_module; \
     make -j"$(nproc)"
 
 WORKDIR /src/nginx/build
@@ -92,19 +86,81 @@ RUN set -eux; \
 
 WORKDIR /out/config
 COPY config ./
-RUN if [ "$WITH_STATS" = 0 ]; then echo > stats.conf; fi
 
 WORKDIR /out/share/html
-RUN if [ ! "$WITH_STATS" = 0 ]; then cp /src/nginx-rtmp-module/stat.xsl .; fi
+RUN cp /src/nginx-rtmp-module/stat.xsl .
 
 WORKDIR /out/bin
 RUN mv /src/nginx/build/nginx nginx
 
 WORKDIR /out/tmp
 
+# ffmpeg build
+FROM docker.io/library/alpine:$ALPINE_VERSION AS ffmpeg-build
+
+ARG FFMPEG_VERSION=7.1
+
+# hadolint ignore=DL3018
+RUN apk add --no-cache \
+    build-base \
+    linux-headers \
+    git \
+    nasm \
+    pkgconf \
+    openssl-dev \
+    openssl-libs-static \
+    zlib-dev \
+    zlib-static \
+    x264-dev
+
+WORKDIR /src/ffmpeg
+
+RUN set -eux; \
+    git clone --depth 1 --single-branch --branch "n$FFMPEG_VERSION" \
+      https://git.ffmpeg.org/ffmpeg.git .
+
+ENV CFLAGS='-Os -fstack-protector-strong -D_FORTIFY_SOURCE=2'
+ENV LDFLAGS='-static -s -Wl,-z,relro,-z,now'
+
+RUN set -eux; \
+    ./configure \
+      --prefix=/out \
+      --bindir=/out/bin \
+      --enable-static \
+      --disable-shared \
+      --disable-debug \
+      --disable-doc \
+      --disable-ffplay \
+      --disable-ffprobe \
+      --enable-gpl \
+      --enable-version3 \
+      --enable-openssl \
+      --enable-libx264 \
+      --disable-everything \
+      --enable-network \
+      --enable-decoder=h264,aac,mp3 \
+      --enable-encoder=libx264,aac \
+      --enable-demuxer=flv,live_flv \
+      --enable-muxer=flv \
+      --enable-protocol=rtmp,rtmps,tcp,tls,file,pipe \
+      --enable-filter=scale,fps,format,aresample,aformat \
+      --enable-bsf=h264_mp4toannexb,aac_adtstoasc \
+      --extra-cflags="$CFLAGS" \
+      --extra-ldflags="$LDFLAGS" \
+      --extra-libs="-lpthread -lm"; \
+    make -j"$(nproc)"; \
+    make install
+
+WORKDIR /out/bin
+RUN set -eux; \
+    strip -s -R .comment --strip-unneeded ffmpeg; \
+    ! ldd ffmpeg && :; \
+    ./ffmpeg -version
+
 FROM scratch
 
-COPY --from=build --chown=1000:1000 /out /
+COPY --from=nginx-build  --chown=1000:1000 /out /
+COPY --from=ffmpeg-build --chown=1000:1000 /out/bin/ffmpeg /bin/ffmpeg
 
 USER 1000:1000
 STOPSIGNAL SIGQUIT
