@@ -3,7 +3,7 @@ ARG FFMPEG_VERSION=7.1
 
 FROM docker.io/library/alpine:$ALPINE_VERSION AS ffmpeg-build
 
-ARG FFMPEG_VERSION
+ARG FFMPEG_VERSION=7.1
 
 # hadolint ignore=DL3018
 RUN apk add --no-cache \

@@ -81,7 +81,7 @@ jobs:
           build-args: |
             ALPINE_VERSION=3.23
             NGINX_VERSION=1.30.1
-            NGINX_RTMP_VERSION=master
+            NGINX_RTMP_VERSION=1.3.0
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

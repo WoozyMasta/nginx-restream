@@ -7,7 +7,7 @@ FROM ghcr.io/woozymasta/nginx-restream/ffmpeg:$FFMPEG_VERSION AS ffmpeg-build
 # nginx build
 FROM docker.io/library/alpine:$ALPINE_VERSION AS nginx-build
 
-ARG NGINX_RTMP_VERSION=master
+ARG NGINX_RTMP_VERSION=1.3.0
 ARG NGINX_VERSION=1.30.1
 
 # hadolint ignore=DL3018

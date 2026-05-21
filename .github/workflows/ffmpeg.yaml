@@ -33,6 +33,7 @@ jobs:
         run: |
           echo "ffmpeg=${{ inputs.ffmpeg_version || '7.1' }}" >> "$GITHUB_OUTPUT"
           echo "alpine=${{ inputs.alpine_version || '3.23' }}" >> "$GITHUB_OUTPUT"
+          echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -58,8 +59,8 @@ jobs:
             FFMPEG_VERSION=${{ steps.versions.outputs.ffmpeg }}
             ALPINE_VERSION=${{ steps.versions.outputs.alpine }}
           tags: |
-            ghcr.io/${{ github.repository }}/ffmpeg:${{ steps.versions.outputs.ffmpeg }}
-            ghcr.io/${{ github.repository }}/ffmpeg:latest
+            ghcr.io/${{ steps.versions.outputs.repo }}/ffmpeg:${{ steps.versions.outputs.ffmpeg }}
+            ghcr.io/${{ steps.versions.outputs.repo }}/ffmpeg:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
