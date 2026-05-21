@@ -1,0 +1,69 @@
+name: ffmpeg
+
+on:
+  workflow_dispatch:
+    inputs:
+      ffmpeg_version:
+        description: ffmpeg version
+        default: '7.1'
+        required: true
+      alpine_version:
+        description: Alpine version
+        default: '3.23'
+        required: true
+  push:
+    paths:
+      - 'Dockerfile.ffmpeg'
+
+permissions:
+  contents: read
+  packages: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set versions
+        id: versions
+        run: |
+          echo "ffmpeg=${{ inputs.ffmpeg_version || '7.1' }}" >> "$GITHUB_OUTPUT"
+          echo "alpine=${{ inputs.alpine_version || '3.23' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.ffmpeg
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            FFMPEG_VERSION=${{ steps.versions.outputs.ffmpeg }}
+            ALPINE_VERSION=${{ steps.versions.outputs.alpine }}
+          tags: |
+            ghcr.io/${{ github.repository }}/ffmpeg:${{ steps.versions.outputs.ffmpeg }}
+            ghcr.io/${{ github.repository }}/ffmpeg:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trigger main build
+        run: gh workflow run build.yaml --ref master
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

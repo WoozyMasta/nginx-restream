@@ -1,4 +1,8 @@
 ARG ALPINE_VERSION=3.23
+ARG FFMPEG_VERSION=7.1
+
+# ffmpeg — pre-built image, rebuild separately via Dockerfile.ffmpeg
+FROM ghcr.io/woozymasta/nginx-restream/ffmpeg:$FFMPEG_VERSION AS ffmpeg-build
 
 # nginx build
 FROM docker.io/library/alpine:$ALPINE_VERSION AS nginx-build
@@ -95,72 +99,10 @@ RUN mv /src/nginx/build/nginx nginx
 
 WORKDIR /out/tmp
 
-# ffmpeg build
-FROM docker.io/library/alpine:$ALPINE_VERSION AS ffmpeg-build
-
-ARG FFMPEG_VERSION=7.1
-
-# hadolint ignore=DL3018
-RUN apk add --no-cache \
-    build-base \
-    linux-headers \
-    git \
-    nasm \
-    pkgconf \
-    openssl-dev \
-    openssl-libs-static \
-    zlib-dev \
-    zlib-static \
-    x264-dev
-
-WORKDIR /src/ffmpeg
-
-RUN set -eux; \
-    git clone --depth 1 --single-branch --branch "n$FFMPEG_VERSION" \
-      https://git.ffmpeg.org/ffmpeg.git .
-
-ENV CFLAGS='-Os -fstack-protector-strong -D_FORTIFY_SOURCE=2'
-ENV LDFLAGS='-static -s -Wl,-z,relro,-z,now'
-
-RUN set -eux; \
-    ./configure \
-      --prefix=/out \
-      --bindir=/out/bin \
-      --enable-static \
-      --disable-shared \
-      --disable-debug \
-      --disable-doc \
-      --disable-ffplay \
-      --disable-ffprobe \
-      --enable-gpl \
-      --enable-version3 \
-      --enable-openssl \
-      --enable-libx264 \
-      --disable-everything \
-      --enable-network \
-      --enable-decoder=h264,aac,mp3 \
-      --enable-encoder=libx264,aac \
-      --enable-demuxer=flv,live_flv \
-      --enable-muxer=flv \
-      --enable-protocol=rtmp,rtmps,tcp,tls,file,pipe \
-      --enable-filter=scale,fps,format,aresample,aformat \
-      --enable-bsf=h264_mp4toannexb,aac_adtstoasc \
-      --extra-cflags="$CFLAGS" \
-      --extra-ldflags="$LDFLAGS" \
-      --extra-libs="-lpthread -lm"; \
-    make -j"$(nproc)"; \
-    make install
-
-WORKDIR /out/bin
-RUN set -eux; \
-    strip -s -R .comment --strip-unneeded ffmpeg; \
-    ! ldd ffmpeg && :; \
-    ./ffmpeg -version
-
 FROM scratch
 
 COPY --from=nginx-build  --chown=1000:1000 /out /
-COPY --from=ffmpeg-build --chown=1000:1000 /out/bin/ffmpeg /bin/ffmpeg
+COPY --from=ffmpeg-build --chown=1000:1000 /ffmpeg /bin/ffmpeg
 
 USER 1000:1000
 STOPSIGNAL SIGQUIT
