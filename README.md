@@ -3,10 +3,10 @@
 Static nginx + nginx-rtmp-module image for multi-platform RTMP restreaming.
 
 The image is built as a static nginx binary
-and packed into a scratch runtime image.  
+and packed into a scratch runtime image.
 It accepts one RTMP publisher and pushes the stream to one or more platforms
 simultaneously using stream keys passed as query args -
-no ffmpeg, no shell, no HTTP callbacks required.
+no shell, no HTTP callbacks required.
 
 Stream flow:
 
@@ -17,19 +17,31 @@ OBS/ffmpeg -> nginx-restream -> YouTube
                              -> ... any platform
 ```
 
-No transcoding is performed.
+No transcoding is performed by default.
 The incoming stream must already be compatible with the target platforms.
+The `latest` image includes ffmpeg for optional transcoding via `exec`.
+
+Built on a fork of
+[nginx-rtmp-module](https://github.com/WoozyMasta/nginx-rtmp-module)
+that adds two features not present in the original:
+
+* **Dynamic push** -
+  stream keys are passed as RTMP query args at publish time,
+  so one running nginx can fan out
+  to any set of platforms without a config reload
+* **TLS outbound (RTMPS)** -
+  outgoing pushes to platforms that require `rtmps://`
+  (Facebook, Kick) work natively without an external stunnel
 
 ## Features
 
 * Static nginx binary, scratch runtime image
-* nginx-rtmp-module with dynamic push and TLS (RTMPS) support
-* Multi-platform restream via RTMP query args -
-  no config change needed
 * RTMP ingest on port 1935
+* Multi-platform restream via query args - no config change needed
 * Stream key is not baked into the image
-* No ffmpeg, no shell in runtime image
-* Two image variants: `latest` (with HTTP stats) and `slim` (RTMP only)
+* No shell in runtime image
+* Two image variants: `latest` (nginx + ffmpeg + HTTP stats)
+  and `slim` (nginx only)
 
 ## Images
 
@@ -43,9 +55,9 @@ docker pull ghcr.io/woozymasta/nginx-restream:slim
 
 Two variants are published:
 
-* `latest` — includes HTTP stats endpoint on port 8080
-* `slim` — RTMP only, no HTTP server, smaller image size
-* `X.Y.Z` / `X.Y.Z-slim` — versioned releases of each variant
+* `latest` - nginx + ffmpeg + HTTP stats endpoint on port 8080
+* `slim` - nginx only, no ffmpeg, no HTTP server, smallest image size
+* `X.Y.Z` / `X.Y.Z-slim` - versioned releases of each variant
 
 ## RTMP URL
 
@@ -62,13 +74,105 @@ Server:     rtmp://SERVER_IP:1935/restream/live
 Stream Key: ?yt=YOUTUBE_KEY&tw=TWITCH_KEY
 ```
 
-Or use a single platform without query args by setting only one arg in the URL.
+## Transcoding with ffmpeg
+
+The `latest` image includes a statically built ffmpeg.
+Use it when platforms have different bitrate limits
+or when the source stream needs to be downscaled before pushing.
+
+nginx-rtmp starts ffmpeg automatically when a stream is published
+and kills it when the stream stops.
+The `$args` variable forwards platform query args from the encoder URL through
+to the destination application.
+
+### All platforms transcoded
+
+The encoder pushes a high-bitrate stream;
+ffmpeg re-encodes it and forwards the result to the restream application.
+
+```nginx
+application transcode {
+    live on;
+    record off;
+
+    exec /bin/ffmpeg
+        -loglevel warning
+        -i rtmp://127.0.0.1:1935/transcode/$name
+        -c:v libx264 -preset veryfast
+        -b:v 5500k -maxrate 5500k -bufsize 11000k
+        -vf scale=1920:1080
+        -r 60
+        -c:a aac -b:a 160k -ar 48000
+        -f flv rtmp://127.0.0.1:1935/restream/live?$args;
+}
+
+application restream {
+    live on;
+    record off;
+
+    dynamic_push_arg yt rtmp://a.rtmp.youtube.com/live2;
+    dynamic_push_arg tw rtmp://live.twitch.tv/app;
+}
+```
+
+```text
+Server:     rtmp://SERVER_IP:1935/transcode/live
+Stream Key: ?yt=YOUTUBE_KEY&tw=TWITCH_KEY
+```
+
+### YouTube original, Twitch transcoded
+
+YouTube accepts high bitrates; Twitch caps at ~6000 kbps.
+Send the original stream to YouTube
+and a re-encoded copy to Twitch simultaneously.
+
+```nginx
+application live {
+    live on;
+    record off;
+
+    # Original stream pushed directly to YouTube
+    dynamic_push_arg yt rtmp://a.rtmp.youtube.com/live2;
+
+    # ffmpeg reads the same published stream, re-encodes for Twitch limits,
+    # and pushes the result to the live_tw application below
+    exec /bin/ffmpeg
+        -loglevel warning
+        -i rtmp://127.0.0.1:1935/live/$name
+        -c:v libx264 -preset veryfast
+        -b:v 5500k -maxrate 5500k -bufsize 11000k
+        -vf scale=1920:1080
+        -r 60
+        -c:a aac -b:a 160k -ar 48000
+        -f flv rtmp://127.0.0.1:1935/live_tw/$name?$args;
+}
+
+application live_tw {
+    live on;
+    record off;
+
+    dynamic_push_arg tw rtmp://live.twitch.tv/app;
+}
+```
+
+```text
+Server:     rtmp://SERVER_IP:1935/live/stream
+Stream Key: ?yt=YOUTUBE_KEY&tw=TWITCH_KEY
+```
+
+ffmpeg spawns unconditionally on every publish to `live`. If `tw` is absent
+from the query args, `live_tw` receives the transcoded stream but
+`dynamic_push_arg tw` does not push anywhere - wasted CPU but no error.
+Use a dedicated application per use case if that matters.
 
 ## Build locally
 
 ```bash
-docker build -t nginx-restream:slim   --build-arg WITH_STATS=0 .
-docker build -t nginx-restream:latest --build-arg WITH_STATS=1 .
+# Full image: nginx + rtmp module + ffmpeg + HTTP stats
+docker build -t nginx-restream:latest -f Dockerfile .
+
+# Slim image: nginx with rtmp module only
+docker build -t nginx-restream:slim -f Dockerfile.slim .
 ```
 
 Check nginx build flags:
@@ -100,11 +204,14 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   --read-only \
-  --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777 \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
   --security-opt no-new-privileges:true \
   --cap-drop ALL \
   nginx-restream:latest
 ```
+
+Note: the `latest` image runs ffmpeg as a subprocess of nginx.
+Increase tmpfs size if you expect multiple concurrent transcoding sessions.
 
 ## Test stream
 
@@ -131,7 +238,7 @@ Audio codec:       AAC
 Audio bitrate:     160-320 Kbps
 ```
 
-The VPS does not transcode. CPU load should be low.
+The VPS does not transcode by default. CPU load should be low.
 Network egress must handle the full stream bitrate multiplied
 by the number of target platforms.
 
