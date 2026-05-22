@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning][].
 ### Removed
 -->
 
+## [0.2.3][] - 2026-05-22
+
+### Fixed
+
+* Set `*_temp_path` paths for http stats page.
+
+[0.2.3]: https://github.com/WoozyMasta/nginx-restream/compare/0.2.2...0.2.3
+
 ## [0.2.2][] - 2026-05-22
 
 ### Changed
