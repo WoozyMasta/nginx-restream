@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning][].
 ### Removed
 -->
 
+## [0.2.2][] - 2026-05-22
+
+### Changed
+
+* The nginx-rtmp-module version has been updated to 1.3.0,
+  which adds support for the new `dynamic_exec_arg` directive
+  for transcoding streams on a per-destination basis.
+
+[0.2.2]: https://github.com/WoozyMasta/nginx-restream/compare/0.2.1...0.2.2
+
 ## [0.2.1][] - 2026-05-21
 
 ### Fixed
