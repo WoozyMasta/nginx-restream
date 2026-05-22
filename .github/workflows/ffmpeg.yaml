@@ -12,6 +12,8 @@ on:
         default: '3.23'
         required: true
   push:
+    branches:
+      - master
     paths:
       - 'Dockerfile.ffmpeg'
 
